@@ -27,6 +27,11 @@
 #define TEST_BIT(t) (1U << (t))
 #define MAX_NR_CPUS 1024
 
+struct wckey {
+       long ukey;
+       long mask;
+};
+
 static __u64 time_get_ns(void)
 {
 	struct timespec ts;
@@ -47,6 +52,8 @@ enum test_type {
 	ARRAY_LOOKUP,
 	INNER_LRU_HASH_PREALLOC,
 	LRU_HASH_LOOKUP,
+	WCMAP_PREALLOC,
+	WCMAP_LOOKUP,
 	NR_TESTS,
 };
 
@@ -62,6 +69,8 @@ const char *test_map_names[NR_TESTS] = {
 	[ARRAY_LOOKUP] = "array_map",
 	[INNER_LRU_HASH_PREALLOC] = "inner_lru_hash_map",
 	[LRU_HASH_LOOKUP] = "lru_hash_lookup_map",
+       [WCMAP_PREALLOC] = "wc_map",
+       [WCMAP_LOOKUP] = "wc_map",
 };
 
 static int test_flags = ~0;
@@ -114,6 +123,17 @@ static int pre_test_lru_hash_lookup(int tasks)
 	}
 
 	return 0;
+
+static void test_wcmap_prealloc(int cpu)
+{
+       __u64 start_time;
+       int i;
+
+       start_time = time_get_ns();
+       for (i = 0; i < max_cnt; i++)
+	       syscall(__NR_access);
+       printf("%d:wcmap_perf pre-alloc %lld events per sec\n",
+	      cpu, max_cnt * 1000000000ll / (time_get_ns() - start_time));
 }
 
 static void do_test_lru(enum test_type test, int cpu)
@@ -276,6 +296,34 @@ static void test_hash_lookup(int cpu)
 	       cpu, max_cnt * 1000000000ll * 64 / (time_get_ns() - start_time));
 }
 
+static void fill_wc_map(void)
+{
+       struct wckey key;
+       long value = 0;
+       int i, r;
+       printf("fille wc map\n");
+
+       for (i = 0; i < 64; i++) {
+	       key.ukey = 1 << i;
+	       key.mask = 1 << i;
+	       r = bpf_map_update_elem(map_fd[10], &key, &value, BPF_ANY);
+	       assert(!r);
+       }
+       return;
+}
+
+static void test_wcmap_lookup(int cpu)
+{
+       __u64 start_time;
+       int i;
+
+       start_time = time_get_ns();
+       for (i = 0; i < max_cnt; i++)
+	       syscall(__NR_lseek, 0);
+       printf("%d:wcmap_lookup %lld lookups per sec\n",
+	      cpu, max_cnt * 1000000000ll * 64 / (time_get_ns() - start_time));
+}
+
 static void test_array_lookup(int cpu)
 {
 	__u64 start_time;
@@ -306,6 +354,8 @@ const test_func test_funcs[] = {
 	[ARRAY_LOOKUP] = test_array_lookup,
 	[INNER_LRU_HASH_PREALLOC] = test_inner_lru_hash_prealloc,
 	[LRU_HASH_LOOKUP] = test_lru_hash_lookup,
+       [WCMAP_PREALLOC] = test_wcmap_prealloc,
+       [WCMAP_LOOKUP] = test_wcmap_lookup,
 };
 
 static int pre_test(int tasks)
@@ -457,6 +507,8 @@ int main(int argc, char **argv)
 	}
 
 	fill_lpm_trie();
+
+       fill_wc_map();
 
 	run_perf_test(num_cpu);
 
